@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>调研问卷回收统计工具</title>
+<!-- 优先加载同目录下的本地 xlsx 库（离线可用）；若缺失则回退到 CDN -->
+<script src="xlsx.full.min.js"></script>
+<script>
+  if (typeof XLSX === 'undefined') {
+    document.write('<scr'+'ipt src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"><\/scr'+'ipt>');
+  }
+</script>
+<style>
+  :root{
+    --bg:#f5f7fa; --card:#ffffff; --line:#e3e8ef; --text:#1f2937; --muted:#6b7280;
+    --brand:#2563eb; --brand2:#1d4ed8; --ok:#16a34a; --warn:#d97706; --bad:#dc2626;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);line-height:1.6}
+  header{padding:20px 24px;background:linear-gradient(120deg,var(--brand),var(--brand2));color:#fff}
+  header h1{margin:0;font-size:20px}
+  header p{margin:4px 0 0;opacity:.9;font-size:13px}
+  main{max-width:980px;margin:0 auto;padding:20px 16px 60px}
+  .step{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px}
+  .step h2{margin:0 0 10px;font-size:15px;display:flex;align-items:center;gap:8px}
+  .step h2 .n{background:var(--brand);color:#fff;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px}
+  .hint{color:var(--muted);font-size:12px;margin:6px 0}
+  input[type=file]{font-size:13px}
+  .drop{border:2px dashed var(--line);border-radius:10px;padding:18px;text-align:center;color:var(--muted);cursor:pointer;transition:.15s}
+  .drop.over{border-color:var(--brand);background:#eef4ff;color:var(--brand)}
+  button{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:9px 18px;font-size:14px;cursor:pointer}
+  button.sec{background:#fff;color:var(--brand);border:1px solid var(--brand)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .summary{font-size:13px;background:#f0f6ff;border:1px solid #cfe0ff;border-radius:8px;padding:10px 12px;margin-top:10px;white-space:pre-wrap}
+  .filecard{border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:10px;font-size:13px;position:relative}
+  .filecard.warn{border-color:var(--bad)}
+  .filecard .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:6px 0}
+  .filecard label{color:var(--muted);font-size:12px;min-width:64px}
+  .filecard .rm{position:absolute;top:10px;right:12px;background:none;color:var(--muted);padding:2px 8px;font-size:14px}
+  .filecard .rm:hover{color:var(--bad)}
+  select,input[type=text]{padding:5px 7px;border:1px solid var(--line);border-radius:7px;font-size:13px;max-width:260px}
+  .badge{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;margin-left:4px}
+  .b-ok{background:#dcfce7;color:var(--ok)} .b-warn{background:#fef3c7;color:var(--warn)} .b-bad{background:#fee2e2;color:var(--bad)}
+  .res{margin-top:10px;font-size:13px} .res table{border-collapse:collapse;width:100%;font-size:12px}
+  .res th,.res td{border:1px solid var(--line);padding:4px 8px;text-align:center}
+  .res th{background:#f1f5f9}
+  .foot{color:var(--muted);font-size:12px;margin-top:18px}
+  code{background:#eef2f7;padding:1px 5px;border-radius:4px;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>调研问卷回收统计工具</h1>
+  <p>上传统计表模板 + 多份问卷，自动按日期/编号汇总并填好「总计」。先预览核对、再确认写入，可复用于下一期广交会。</p>
+</header>
+<main>
+
+  <div class="step">
+    <h2><span class="n">1</span>上传统计表模板</h2>
+    <div class="hint">即你现在的《调研问卷回收情况…xlsx》。程序会读取它的结构（区块标题/期次/日期/编号），后续填表都按它来。可点"记住此模板"存到本机浏览器，下次免传。</div>
+    <input type="file" id="tplFile" accept=".xlsx,.xls">
+    <button class="sec" id="rememberBtn" style="display:none;margin-left:8px">记住此模板</button>
+    <div id="tplSummary" class="summary" style="display:none"></div>
+  </div>
+
+  <div class="step">
+    <h2><span class="n">2</span>上传问卷（可多选 / 拖拽）</h2>
+    <div class="hint">支持一次上传多份。每份会自动识别对应区块与时间/编号列；<b>若出现红色"未识别"提示，请务必在下拉框中手动选对</b>——未解决的文件不会进入生成。识别日期与编号质量也会一并展示。</div>
+    <div class="drop" id="drop">把问卷文件拖到这里，或点击选择
+      <input type="file" id="qFiles" accept=".xlsx,.xls" multiple style="display:none">
+    </div>
+    <div id="fileList"></div>
+  </div>
+
+  <div class="step">
+    <h2><span class="n">3</span>预览并生成</h2>
+    <div class="hint">点击「预览统计结果」→ 核对每份文件的区块/日期/条数 → 确认无误后点「确认下载」。写入只覆盖问卷涉及的日期列，模板中其他数据保持原样；重复生成同一批数据结果不变。</div>
+    <button id="genBtn" disabled>预览统计结果</button>
+    <button id="confirmBtn" style="display:none;margin-left:10px">确认下载</button>
+    <span id="genStatus" class="hint" style="margin-left:10px"></span>
+    <div id="result" class="res"></div>
+  </div>
+
+  <div class="foot">
+    说明：本工具<b>完全在本地浏览器运行</b>，问卷与统计表数据不会上传到任何服务器。把 <code>xlsx.full.min.js</code> 与本文件放在同一目录即可完全离线使用；若该文件缺失，会自动回退到联网加载。
+  </div>
+</main>
+
+<script>
+/* ============ 全局状态 ============ */
+let TEMPLATE = null;          // 解析后的模板结构
+let TPL_WB = null;            // 模板 workbook（仅写入瞬间使用，每次从原始字节重建）
+let TPL_BYTES = null;         // 模板原始字节（写入时的干净底稿）
+const files = [];             // {file, analyzed, manual:{block,timeCol,idCol}, analysis}
+
+/* ============ 工具：日期/编号解析 ============ */
+function excelSerialToDate(serial){
+  // Excel 日期序列号 -> Date
+  const utc = (serial - 25569) * 86400 * 1000;
+  return new Date(utc);
+}
+function normDate(v){
+  // 返回 "M.D" 或 null
+  if (v == null) return null;
+  if (v instanceof Date) return (v.getMonth()+1) + '.' + v.getDate();
+  if (typeof v === 'number'){
+    // 大数字视为 Excel 日期序列号；小数字(如 10.26)交给调用方用显示文本 .w 传入
+    if (v >= 20000){
+      const d = excelSerialToDate(v);
+      if (!isNaN(d.getTime())) return (d.getMonth()+1) + '.' + d.getDate();
+    }
+    return null;
+  }
+  let s = String(v).trim();
+  // 去掉时间部分
+  s = s.split(' ')[0];
+  let parts = s.split('/');
+  if (parts.length === 3) return parseInt(parts[1],10) + '.' + parseInt(parts[2],10);
+  parts = s.split('-');
+  if (parts.length === 3) return parseInt(parts[1],10) + '.' + parseInt(parts[2],10);
+  // 形如 10.26（也可能是 2026/10/26 被上面分支处理；这里处理 M.D）
+  parts = s.split('.');
+  if (parts.length === 2 && /^\d+$/.test(parts[0]) && /^\d+$/.test(parts[1])) return parseInt(parts[0],10)+'.'+parseInt(parts[1],10);
+  return null;
+}
+// 取单元格“显示文本”：模板日期常以数字(10.16)存储，必须用 .w 才能得到 "10.16" 而非被误判为序列号
+function cellVal(v){
+  if (!v || v.v == null) return null;
+  if (typeof v.w === 'string' && v.w.trim() !== '') return v.w;
+  return v.v;
+}
+function parseId(v){
+  if (v == null) return {ok:false, raw:''};
+  let s = String(v).trim();
+  if (s === '') return {ok:false, raw:''};
+  // 去可能的空格/全角
+  if (/^\d+$/.test(s)) return {ok:true, id:parseInt(s,10), raw:s};
+  return {ok:false, raw:s};
+}
+function dkey(d){ const p=d.split('.'); return parseInt(p[0],10)*100+parseInt(p[1],10); }
+function fmtDates(dates){
+  if (!dates.length) return '—';
+  if (dates.length<=5) return dates.join('、');
+  return dates[0]+' … '+dates[dates.length-1];
+}
+function short(s,n){ s=String(s); return s.length>n? s.slice(0,n)+'…' : s; }
+
+/* ============ 关键词 ============ */
+// 关键词按优先级分组：前面组优先于后面组
+// ID 检测第一优先必须是『编号/編號』，否则 'staff' 会误命中 "with staff" 等题目、'号' 会误命中『序号』
+const TIME_GROUPS = [['提交','時間','时间'],['time','date']];
+const ID_GROUPS   = [['編號','编号'],['工号','staff'],['id']];
+
+// 繁简统一：把常见繁体字符映射到简体，便于文件名(繁)与模板标题(简)对齐匹配
+const TRAD2SIMP = {'採':'采','參':'参','會':'会','調':'调','驗':'验','評':'评','價':'价','飲':'饮',
+  '務':'务','貿':'贸','問':'问','捲':'卷','況':'况','點':'点','場':'场','區':'区','國':'国','買':'买',
+  '賣':'卖','編':'编','號':'号','冊':'册','體':'体','處':'处','當':'当','產':'产','來':'来','與':'与',
+  '後':'后','開':'开','關':'关','實':'实','對':'对','應':'应','態':'态','無':'无','佔':'占','製':'制',
+  '複':'复','細':'细','總':'总','畫':'画','農':'农','書':'书','車':'车','門':'门','東':'东','網':'网',
+  '約':'约','級':'级','績':'绩','單':'单','備':'备','專':'专','項':'项','顧':'顾','員':'员','說':'说',
+  '話':'话','語':'语','讀':'读','購':'购','辦':'办','證':'证','館':'馆','際':'际','題':'题','強':'强',
+  '職':'职','業':'业','類':'类','這':'这','個':'个','時':'时','間':'间','擇':'择','準':'准','報':'报',
+  '紙':'纸','圖':'图','幫':'帮','裝':'装','舉':'举','舊':'旧','錢':'钱','銀':'银','飛':'飞','魚':'鱼',
+  '鳥':'鸟','馬':'马','島':'岛','鄉':'乡','縣':'县','層':'层','歲':'岁','歷':'历','嚴':'严','團':'团',
+  '圓':'圆','園':'园','塊':'块','壞':'坏','夢':'梦','獎':'奖','學':'学','覺':'觉','讓':'让','禮':'礼',
+  '種':'种','觸':'触','認':'认','識':'识','變':'变','顯':'显','霧':'雾','韓':'韩','顏':'颜','風':'风',
+  '麗':'丽','鴻':'鸿','龍':'龙','歡':'欢','愛':'爱','義':'义','親':'亲','視':'视','試':'试','詞':'词',
+  '補':'补','錶':'表','遊':'游','過':'过','運':'运','黃':'黄','聖':'圣','動':'动','勢':'势','腦':'脑',
+  '燈':'灯','歸':'归','競':'竞','簡':'简','糧':'粮','觀':'观','權':'权','歐':'欧','審':'审','寶':'宝'};
+function normScript(s){
+  return String(s).split('').map(c=>TRAD2SIMP[c]||c).join('');
+}
+
+/* 匹配问卷文件 → 模板区块标题。
+   规则：繁简统一后，取「被文件名完整包含且最长」的区块标题；
+   匹配不到时返回 null —— 由界面红牌拦截并要求手动选择，绝不静默兜底到第一个区块 */
+function matchBlock(filename, blockTitles){
+  const f = normScript(filename.toLowerCase());
+  let best=null, bestLen=0;
+  for (const t of blockTitles){
+    const tl = normScript(t.toLowerCase());
+    if (tl && f.includes(tl) && tl.length>bestLen){ best=t; bestLen=tl.length; }
+  }
+  return best;
+}
+function matchColGroups(headers, groups){
+  // 每组依次尝试：优先匹配强信号（编号/staff），再退而求其次（号/id）
+  for (const grp of groups){
+    for (let i=0;i<headers.length;i++){
+      const h = String(headers[i]||'').toLowerCase();
+      for (const k of grp){
+        if (h.includes(k.toLowerCase())) return i;
+      }
+    }
+  }
+  return -1;
+}
+
+/* ============ 读取模板结构 ============ */
+function readTemplate(arr){
+  const wb = XLSX.read(arr, {type:'array', cellDates:true, raw:false});
+  // 选目标 sheet：第1行含区块关键词最多的
+  let best=null, bestScore=-1;
+  for (const name of wb.SheetNames){
+    const ws = wb.Sheets[name];
+    const ref = ws['!ref']; if(!ref) continue;
+    const range = XLSX.utils.decode_range(ref);
+    let score=0;
+    for (let c=range.s.c;c<=range.e.c;c++){
+      const v = ws[XLSX.utils.encode_cell({r:0,c})];
+      if (v && v.v!=null && String(v.v).trim()!=='') score++;
+    }
+    if (score>bestScore){bestScore=score; best=name;}
+  }
+  if (!best) throw new Error('未在模板中找到含区块标题的工作表');
+  const ws = wb.Sheets[best];
+  const ref = XLSX.utils.decode_range(ws['!ref']);
+
+  // 第1行区块标题
+  const blocks=[]; // {title,startCol}
+  for (let c=ref.s.c;c<=ref.e.c;c++){
+    const v = ws[XLSX.utils.encode_cell({r:0,c})];
+    if (v && v.v!=null && String(v.v).trim()!==''){
+      blocks.push({title:String(v.v).trim(), startCol:c});
+    }
+  }
+  // 每个 block 的日期列(第3行) 与 编号行(A列,第5行起)
+  const blockMap = {};
+  for (let i=0;i<blocks.length;i++){
+    const b = blocks[i];
+    const endCol = (i+1<blocks.length)? blocks[i+1].startCol-1 : ref.e.c;
+    const dateCols = {}; // "M.D" -> col
+    for (let c=b.startCol;c<=endCol;c++){
+      const v = ws[XLSX.utils.encode_cell({r:2,c})];
+      if (v && v.v!=null && String(v.v).trim()!==''){
+        const d = normDate(cellVal(v));
+        if (d) dateCols[d]=c;
+      }
+    }
+    blockMap[b.title] = {startCol:b.startCol, endCol, dateCols};
+  }
+  // 编号行：A列(0) 第5行(index4)起
+  const idRows = {}; // id -> rowIndex
+  const validIds = new Set();
+  for (let r=4;r<=ref.e.r;r++){
+    const v = ws[XLSX.utils.encode_cell({r,c:0})];
+    if (v && v.v!=null && String(v.v).trim()!==''){
+      const p = parseId(v.v);
+      if (p.ok){ idRows[p.id]=r; validIds.add(p.id); }
+    }
+  }
+  return {wb, sheetName:best, blocks, blockMap, idRows, validIds, maxRow:ref.e.r, maxCol:ref.e.c};
+}
+// 数据区块标题（排除「总计」，总计只由程序计算）
+function dataBlockTitles(){
+  return TEMPLATE.blocks.map(b=>b.title).filter(t=>t!=='总计');
+}
+// 模板里出现过的所有日期（任一区块）
+function templateDatesUnion(){
+  const s=new Set();
+  for (const t in TEMPLATE.blockMap) for (const d in TEMPLATE.blockMap[t].dateCols) s.add(d);
+  return s;
+}
+
+/* ============ 解析问卷（结构级：sheet/列/区块猜测） ============ */
+function analyzeQuestionnaire(arr, filename){
+  const wb = XLSX.read(arr, {type:'array', cellDates:true, raw:false});
+  // 选数据 sheet：含"时间"关键词表头的
+  let sheetName=null, headers=null, ws=null;
+  for (const name of wb.SheetNames){
+    const w = wb.Sheets[name];
+    const ref = w['!ref']; if(!ref) continue;
+    const range = XLSX.utils.decode_range(ref);
+    const hs=[];
+    for (let c=range.s.c;c<=range.e.c;c++){
+      const v=w[XLSX.utils.encode_cell({r:0,c})];
+      hs.push(v&&v.v!=null?String(v.v):'');
+    }
+    const tIdx = matchColGroups(hs, TIME_GROUPS);
+    if (tIdx>=0){ sheetName=name; headers=hs; ws=w; break; }
+  }
+  if (!ws){ // 退化：取第一个有数据的 sheet
+    sheetName = wb.SheetNames[0]; ws=wb.Sheets[sheetName];
+    const ref=ws['!ref']; const range=XLSX.utils.decode_range(ref);
+    headers=[]; for(let c=range.s.c;c<=range.e.c;c++){const v=ws[XLSX.utils.encode_cell({r:0,c})];headers.push(v&&v.v!=null?String(v.v):'');}
+  }
+  const ref = XLSX.utils.decode_range(ws['!ref']);
+  const tIdx = matchColGroups(headers, TIME_GROUPS);
+  const iIdx = matchColGroups(headers, ID_GROUPS);
+  // 可能为 null —— 界面会红牌要求手动选择，绝不静默兜底
+  const guessedBlock = matchBlock(filename, dataBlockTitles());
+  return {wb, sheetName, ws, ref, headers, timeCol:tIdx, idCol:iIdx, guessedBlock, filename};
+}
+
+/* ============ 逐份问卷的数据级分析（只算不写） ============ */
+function analyzeFile(f){
+  const m = f.manual || {block:null, timeCol:-1, idCol:-1};
+  // 防御：文件结构异常时返回空分析，由区块守卫在写入阶段跳过，绝不让程序崩溃
+  if (!f.analyzed || !f.analyzed.ws || !f.analyzed.ref){
+    return {block:m.block, cnt:{}, dirty:{}, rows:0, cntSum:0, dirtyTotal:0, dates:[], orphanDates:[],
+      idWarn:false, noTimeCol:m.timeCol<0, noIdCol:m.idCol<0};
+  }
+  const a = f.analyzed, ws2 = a.ws, ref = a.ref;
+  const tC = f.manual.timeCol, iC = f.manual.idCol;
+  const cnt = {};    // "date|id" -> n
+  const dirty = {};  // rawId -> n
+  let rows = 0;
+  const datesSet = new Set();
+  if (tC >= 0 && iC >= 0){
+    for (let r=ref.s.r+1;r<=ref.e.r;r++){
+      const tv = ws2[XLSX.utils.encode_cell({r,c:tC})];
+      const iv = ws2[XLSX.utils.encode_cell({r,c:iC})];
+      if ((tv==null||tv.v==null) && (iv==null||iv.v==null)) continue;
+      const d = normDate(cellVal(tv));
+      if (!d) continue;
+      rows++;
+      const pid = parseId(cellVal(iv));
+      if (!pid.ok){ dirty[pid.raw]=(dirty[pid.raw]||0)+1; continue; }
+      if (!TEMPLATE.validIds.has(pid.id)){ dirty[pid.raw]=(dirty[pid.raw]||0)+1; continue; }
+      datesSet.add(d);
+      const key = d+'|'+pid.id;
+      cnt[key]=(cnt[key]||0)+1;
+    }
+  }
+  const dates = [...datesSet].sort((x,y)=>dkey(x)-dkey(y));
+  const cntSum = Object.values(cnt).reduce((s,x)=>s+x,0);
+  const dirtyTotal = rows - cntSum;
+  const tDates = templateDatesUnion();
+  const orphanDates = dates.filter(d=>!tDates.has(d));   // 模板没有对应日期列 → 这些记录会被跳过
+  return {
+    block: f.manual.block,
+    cnt, dirty, rows, cntSum, dirtyTotal, dates, orphanDates,
+    idWarn: rows>0 && dirtyTotal/rows > 0.10,   // 编号列质量自检：脏率>10% 提示核对
+    noTimeCol: tC<0, noIdCol: iC<0
+  };
+}
+
+/* ============ 预览（不写入任何数据） ============ */
+function buildPreview(){
+  if (!TEMPLATE || files.length===0) return;
+  const orphanAll = new Set();
+  let html = '<h3>预览（尚未写入，请核对）</h3>';
+  html += '<table><tr><th>问卷文件</th><th>对应区块</th><th>识别日期</th><th>计入统计</th><th>脏/越界编号</th><th>将写入单元格</th><th>状态</th></tr>';
+  for (const f of files){
+    const an = analyzeFile(f);
+    f.analysis = an;
+    an.orphanDates.forEach(d=>orphanAll.add(d));
+    const bmap = TEMPLATE.blockMap[an.block];
+    let written = 0;
+    if (bmap){
+      for (const key in an.cnt){
+        const [d,idStr]=key.split('|');
+        const id=parseInt(idStr,10);
+        if ((d in bmap.dateCols) && (id in TEMPLATE.idRows)) written++;
+      }
+    }
+    an.written = written;
+    const st = (an.noTimeCol||an.noIdCol) ? '<span class="badge b-bad">缺列</span>'
+             : an.idWarn ? '<span class="badge b-warn">编号列可疑</span>'
+             : '<span class="badge b-ok">正常</span>';
+    html += `<tr><td>${esc(short(f.file.name,40))}</td><td>${esc(an.block||'(未选)')}</td><td>${esc(an.dates.length?fmtDates(an.dates):'—')}</td><td>${an.cntSum}</td><td>${an.dirtyTotal}</td><td>${written}</td><td>${st}</td></tr>`;
+  }
+  html += '</table>';
+  if (orphanAll.size){
+    html += `<p><span class="badge b-warn">模板缺少日期列：${esc([...orphanAll].sort((a,b)=>dkey(a)-dkey(b)).join('、'))}（这些日期的记录将被跳过）</span></p>`;
+  }
+  html += '<p class="hint">说明：「计入统计」= 日期和编号都有效的记录；「脏/越界编号」= 编号非纯数字或超出模板编号范围，会导出到脏编号明细。写入只覆盖问卷涉及的日期列，其余保持原样。</p>';
+  document.getElementById('result').innerHTML = html;
+  document.getElementById('confirmBtn').style.display = 'inline-block';
+  document.getElementById('genStatus').textContent = '请核对上方预览，确认无误后点击「确认下载」';
+}
+
+/* ============ 确认写入 + 下载 ============ */
+function doGenerate(){
+  if (!TEMPLATE || files.length===0) return;
+  // 关键：每次生成都从原始模板字节重建，保证多次生成互不叠加、覆盖即幂等
+  TPL_WB = XLSX.read(TPL_BYTES, {type:'array', cellDates:true});
+  const ws = TPL_WB.Sheets[TEMPLATE.sheetName];
+  const dirtyList = [];
+  const perFile = [];
+  const orphanAll = new Set();
+  for (const f of files){
+    const an = analyzeFile(f);
+    an.orphanDates.forEach(d=>orphanAll.add(d));
+    const block = f.manual.block;
+    if (!block){ perFile.push({name:f.file.name, err:'未识别区块，已跳过'}); continue; }
+    const bmap = TEMPLATE.blockMap[block];
+    if (!bmap){ perFile.push({name:f.file.name, err:'区块不存在: '+block}); continue; }
+    let written=0;
+    for (const key in an.cnt){
+      const [d,idStr]=key.split('|');
+      const id=parseInt(idStr,10);
+      if (!(d in bmap.dateCols)) continue;
+      if (!(id in TEMPLATE.idRows)) continue;
+      const col = bmap.dateCols[d];
+      const row = TEMPLATE.idRows[id];
+      ws[XLSX.utils.encode_cell({r:row,c:col})] = {t:'n', v:an.cnt[key]};
+      written++;
+    }
+    for (const raw in an.dirty) dirtyList.push({file:f.file.name, rawId:raw, count:an.dirty[raw]});
+    perFile.push({name:f.file.name, block, cntSum:an.cntSum, written, dirtyTotal:an.dirtyTotal});
+  }
+  // 重算总计 = 各数据区块按列求和
+  const qTitles = dataBlockTitles();
+  const totalBlock = TEMPLATE.blockMap['总计'];
+  let mismatch=0;
+  if (totalBlock){
+    for (const d in totalBlock.dateCols){
+      const tcol = totalBlock.dateCols[d];
+      for (const id in TEMPLATE.idRows){
+        const row = TEMPLATE.idRows[id];
+        let s=0;
+        for (const qt of qTitles){
+          const bm = TEMPLATE.blockMap[qt];
+          if (d in bm.dateCols){
+            const v = ws[XLSX.utils.encode_cell({r:row,c:bm.dateCols[d]})];
+            if (v && typeof v.v==='number') s+=v.v;
+          }
+        }
+        const addr = XLSX.utils.encode_cell({r:row,c:tcol});
+        ws[addr] = {t:'n', v:s};
+      }
+    }
+    // 自检
+    for (const d in totalBlock.dateCols){
+      const tcol=totalBlock.dateCols[d];
+      for (const id in TEMPLATE.idRows){
+        const row=TEMPLATE.idRows[id];
+        let s=0;
+        for (const qt of qTitles){
+          const bm=TEMPLATE.blockMap[qt];
+          if (d in bm.dateCols){
+            const v=ws[XLSX.utils.encode_cell({r:row,c:bm.dateCols[d]})];
+            if (v&&typeof v.v==='number') s+=v.v;
+          }
+        }
+        const tv=ws[XLSX.utils.encode_cell({r:row,c:tcol})];
+        const act = tv&&typeof tv.v==='number'?tv.v:0;
+        if (s!==act) mismatch++;
+      }
+    }
+  }
+  // 下载结果
+  const outName = '调研问卷回收情况_已填.xlsx';
+  XLSX.writeFile(TPL_WB, outName);
+  // 下载脏编号清单
+  if (dirtyList.length){
+    const dwb = XLSX.utils.book_new();
+    const rows = [['文件名','原始编号(脏/越界)','出现次数']];
+    for (const d of dirtyList) rows.push([d.file, d.rawId, d.count]);
+    const wsD = XLSX.utils.aoa_to_sheet(rows);
+    XLSX.utils.book_append_sheet(dwb, wsD, '脏编号明细');
+    XLSX.writeFile(dwb, '脏编号明细.xlsx');
+  }
+  renderResult(perFile, mismatch, dirtyList, orphanAll);
+  document.getElementById('genStatus').textContent = '完成！已下载《'+outName+'》'+(dirtyList.length?' 与《脏编号明细.xlsx》':'')+(mismatch?' ⚠总计自检不一致'+mismatch+'格':' ✓总计自检一致');
+}
+
+/* ============ 渲染 ============ */
+function renderResult(perFile, mismatch, dirtyList, orphanAll){
+  let html = '<h3>生成结果（已写入并下载）</h3>';
+  html += '<table><tr><th>问卷文件</th><th>对应区块</th><th>计入统计</th><th>写入单元格</th><th>脏/越界编号</th></tr>';
+  for (const p of perFile){
+    if (p.err){ html += `<tr><td>${esc(p.name)}</td><td colspan="4" style="color:var(--bad)">${esc(p.err)}</td></tr>`; continue; }
+    html += `<tr><td>${esc(p.name)}</td><td>${esc(p.block)}</td><td>${p.cntSum}</td><td>${p.written}</td><td>${p.dirtyTotal}</td></tr>`;
+  }
+  html += '</table>';
+  if (orphanAll && orphanAll.size){
+    html += `<p><span class="badge b-warn">以下日期在模板中无对应列，记录被跳过：${esc([...orphanAll].join('、'))}</span></p>`;
+  }
+  html += `<p>总计自检不一致单元格数：<b class="${mismatch?'b-bad':'b-ok'}">${mismatch}</b>（0 为正常）</p>`;
+  if (dirtyList.length){
+    html += '<details><summary>脏/越界编号清单（'+dirtyList.length+' 条）</summary><table><tr><th>文件</th><th>原始编号</th><th>次数</th></tr>';
+    for (const d of dirtyList) html += `<tr><td>${esc(d.file)}</td><td>${esc(d.rawId)}</td><td>${d.count}</td></tr>`;
+    html += '</table></details>';
+  }
+  document.getElementById('result').innerHTML = html;
+}
+function esc(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+
+/* ============ 文件卡片 ============ */
+function createCard(item, idx){
+  const a = item.analyzed;
+  let blockOpts = '';
+  if (!item.manual.block) blockOpts += '<option value="" selected disabled>— 请选择对应区块 —</option>';
+  blockOpts += dataBlockTitles().map(t=>`<option value="${esc(t)}" ${t===item.manual.block?'selected':''}>${esc(t)}</option>`).join('');
+  const colOpts = (sel)=>{
+    let o = '';
+    if (sel<0) o += `<option value="-1" selected disabled>— 未识别，请选择 —</option>`;
+    o += a.headers.map((h,i)=>`<option value="${i}" ${i===sel?'selected':''}>${esc(short(h||('列'+(i+1)),30))}</option>`).join('');
+    return o;
+  };
+  const div=document.createElement('div');
+  div.className='filecard';
+  div.innerHTML=`
+    <div><b>${esc(short(a.filename,44))}</b> <span data-role="blkBadge"></span>
+      <button class="rm" title="移除此文件">✕</button></div>
+    <div class="row"><label>对应区块</label><select data-i="${idx}" data-k="block">${blockOpts}</select></div>
+    <div class="row"><label>时间列</label><select data-i="${idx}" data-k="timeCol">${colOpts(item.manual.timeCol)}</select></div>
+    <div class="row"><label>编号列</label><select data-i="${idx}" data-k="idCol">${colOpts(item.manual.idCol)}</select></div>
+    <div data-role="meta" style="color:var(--muted);font-size:12px;margin-top:4px"></div>`;
+  div.querySelectorAll('select').forEach(sel=>{
+    sel.addEventListener('change',()=>{
+      const i=+sel.dataset.i, k=sel.dataset.k, f=files[i];
+      if (k==='block') f.manual.block = sel.value || null;
+      else f.manual[k] = parseInt(sel.value,10);
+      f.analysis = analyzeFile(f);
+      updateCardMeta(f,i);
+      updateGenBtn();
+    });
+  });
+  div.querySelector('.rm').addEventListener('click',()=>removeFile(idx));
+  document.getElementById('fileList').appendChild(div);
+  item.cardEl = div;
+  updateCardMeta(item, idx);
+}
+function updateCardMeta(f, idx){
+  const card=f.cardEl; if(!card) return;
+  const badge=card.querySelector('[data-role="blkBadge"]');
+  const an=f.analysis;
+  if (!f.manual.block){ badge.className='badge b-bad'; badge.textContent='⛔ 未识别区块，请手动选择'; card.classList.add('warn'); }
+  else if (f.manual.block===f.analyzed.guessedBlock){ badge.className='badge b-ok'; badge.textContent='自动识别'; card.classList.remove('warn'); }
+  else { badge.className='badge b-ok'; badge.textContent='已手动指定'; card.classList.remove('warn'); }
+  const meta=card.querySelector('[data-role="meta"]');
+  const parts=[];
+  if (an.noTimeCol) parts.push('<span class="badge b-bad">未找到时间列</span>');
+  if (an.noIdCol) parts.push('<span class="badge b-bad">未找到编号列</span>');
+  if (an.idWarn) parts.push(`<span class="badge b-warn">编号列可疑：脏/越界 ${an.dirtyTotal}/${an.rows}（>10%），请核对</span>`);
+  if (an.orphanDates.length) parts.push(`<span class="badge b-warn">模板缺少日期列：${esc(an.orphanDates.join('、'))}（这些记录将跳过）</span>`);
+  const dateLine = an.dates.length
+    ? `识别日期：<b>${esc(fmtDates(an.dates))}</b>｜计入统计 <b>${an.cntSum}</b> 条${an.dirtyTotal?`｜脏/越界 ${an.dirtyTotal} 条`:''}`
+    : '未识别到有效日期记录';
+  meta.innerHTML = dateLine + (parts.length? '<br>'+parts.join(' ') : '');
+}
+function rerenderAllCards(){
+  const box=document.getElementById('fileList');
+  box.innerHTML='';
+  files.forEach((f,i)=>{ f.cardEl=null; createCard(f,i); });
+}
+function removeFile(idx){
+  files.splice(idx,1);
+  rerenderAllCards();
+  updateGenBtn();
+}
+
+/* ============ UI 状态 ============ */
+function resetResult(){
+  document.getElementById('confirmBtn').style.display='none';
+  document.getElementById('result').innerHTML='';
+  document.getElementById('genStatus').textContent='';
+}
+function updateGenBtn(){
+  resetResult();
+  const gen=document.getElementById('genBtn');
+  const st=document.getElementById('genStatus');
+  if (!TEMPLATE || files.length===0){ gen.disabled=true; return; }
+  const problems=[];
+  files.forEach(f=>{
+    if (!f.manual.block) problems.push(`《${short(f.file.name,24)}》未识别对应区块`);
+    else if (f.manual.timeCol<0 || f.manual.idCol<0) problems.push(`《${short(f.file.name,24)}》未识别时间/编号列`);
+  });
+  if (problems.length){
+    gen.disabled=true;
+    st.textContent='⛔ '+problems[0]+(problems.length>1?` 等 ${problems.length} 个问题待解决`:'');
+  } else {
+    gen.disabled=false;
+  }
+}
+function onTemplateReady(){
+  showTplSummary();
+  document.getElementById('rememberBtn').style.display='inline-block';
+  // 若已添加过问卷：按新模板重新猜测区块并重算分析
+  files.forEach((f,i)=>{
+    f.analyzed.guessedBlock = matchBlock(f.file.name, dataBlockTitles());
+    f.manual.block = f.analyzed.guessedBlock;
+    f.analysis = analyzeFile(f);
+  });
+  rerenderAllCards();
+  updateGenBtn();
+}
+
+/* ============ UI 事件 ============ */
+const tplFile = document.getElementById('tplFile');
+tplFile.addEventListener('change', e=>{
+  const f = e.target.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = ev=>{
+    try{
+      TPL_BYTES = new Uint8Array(ev.target.result);
+      TEMPLATE = readTemplate(TPL_BYTES);
+      TPL_WB = null; // 写入时再按需重建
+      onTemplateReady();
+    }catch(err){ alert('读取模板失败：'+err.message); }
+  };
+  r.readAsArrayBuffer(f);
+});
+function showTplSummary(){
+  const t=TEMPLATE;
+  let s='已识别模板结构：\n';
+  s+='目标工作表：'+t.sheetName+'\n';
+  s+='数据区块('+dataBlockTitles().length+')：'+dataBlockTitles().join(' | ')+'\n';
+  s+='有效调研员编号：'+[...t.validIds].sort((a,b)=>a-b).join(',')+'\n';
+  s+='日期列：'+Object.keys(t.blockMap[dataBlockTitles()[0]].dateCols).join(', ');
+  const el=document.getElementById('tplSummary'); el.style.display='block'; el.textContent=s;
+}
+document.getElementById('rememberBtn').addEventListener('click',()=>{
+  if (TPL_BYTES) localStorage.setItem('wq_template', JSON.stringify(Array.from(TPL_BYTES)));
+  document.getElementById('rememberBtn').textContent='已记住 ✓';
+  document.getElementById('rememberBtn').disabled=true;
+});
+// 启动时尝试恢复记住的模板
+(function restore(){
+  const saved = localStorage.getItem('wq_template');
+  if (saved){
+    try{
+      TPL_BYTES = new Uint8Array(JSON.parse(saved));
+      TEMPLATE = readTemplate(TPL_BYTES);
+      onTemplateReady();
+      const rb=document.getElementById('rememberBtn'); rb.style.display='inline-block'; rb.textContent='已记住 ✓'; rb.disabled=true;
+    }catch(e){}
+  }
+})();
+
+// 问卷文件选择/拖拽
+const drop=document.getElementById('drop');
+const qFiles=document.getElementById('qFiles');
+drop.addEventListener('click',()=>qFiles.click());
+qFiles.addEventListener('change',e=>addFiles(e.target.files));
+['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
+drop.addEventListener('drop',e=>addFiles(e.dataTransfer.files));
+
+function addFiles(fileList){
+  if (!TEMPLATE){ alert('请先在第 1 步上传统计表模板，再添加问卷。'); return; }
+  for (const f of fileList){
+    if (!/\.xlsx?$/i.test(f.name)) continue;
+    const r=new FileReader();
+    r.onload=ev=>{
+      try{
+        const arr=new Uint8Array(ev.target.result);
+        const a=analyzeQuestionnaire(arr, f.name);
+        const item={file:f, analyzed:a, manual:{block:a.guessedBlock, timeCol:a.timeCol, idCol:a.idCol}, analysis:null};
+        item.analysis = analyzeFile(item);
+        files.push(item);
+        createCard(item, files.length-1);
+        updateGenBtn();
+      }catch(err){ alert('解析《'+f.name+'》失败：'+err.message); }
+    };
+    r.readAsArrayBuffer(f);
+  }
+}
+document.getElementById('genBtn').addEventListener('click',buildPreview);
+document.getElementById('confirmBtn').addEventListener('click',doGenerate);
+</script>
+</body>
+</html>
