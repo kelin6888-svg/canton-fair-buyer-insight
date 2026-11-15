@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 本地环境与密钥（切勿提交）
+.env
+.streamlit/secrets.toml
+*.pem
+*.key
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# 临时与日志
+*.log
+*.tmp
+~$*

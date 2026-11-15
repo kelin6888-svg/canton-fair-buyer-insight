@@ -1,0 +1,13 @@
+# Streamlit 主题配置 —— 与《项目演示.pptx》科技蓝设计体系保持一致
+# 强制 light，避免跟随系统深色主题导致视觉不统一
+[theme]
+base = "light"
+primaryColor = "#2563EB"
+backgroundColor = "#F4F7FC"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1E293B"
+font = "sans serif"
+
+[server]
+headless = true
+gatherUsageStats = false
